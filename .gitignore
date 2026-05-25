@@ -27,6 +27,10 @@ env/
 .DS_Store
 Thumbs.db
 
+# Processed data (large generated files)
+processed/
+figures/
+
 # Python cache
 *.pyc
 .pytest_cache/
