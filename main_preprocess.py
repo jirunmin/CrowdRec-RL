@@ -17,6 +17,8 @@ import argparse
 import os
 import sys
 
+import pandas as pd
+
 # 将项目根目录加入 path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -24,6 +26,8 @@ from src.data_loader import load_all_data
 from src.preprocessing import run_cleaning
 from src.features import (build_project_features,
                            build_worker_features)
+from src.quality_predictor import (train_quality_predictor,
+                                    predict_quality)
 from src.event_stream import build_event_stream, build_training_samples
 from src.dataset import (generate_candidates_batch,
                           save_processed_data,
@@ -46,6 +50,9 @@ def main():
     parser.add_argument("--test_ratio", type=float, default=0.15)
     parser.add_argument("--skip_candidates", action="store_true",
                         help="跳过候选集生成（加速预处理）")
+    parser.add_argument("--quality_mode", type=str, default="predict",
+                        choices=["median", "predict"],
+                        help="Worker quality 模式: median=中位数填充, predict=ML预测")
     args = parser.parse_args()
 
     # ============================================================
@@ -61,6 +68,17 @@ def main():
         worker_df, entries_df, projects_dict, fill_na=args.fill_na
     )
 
+    # 2.5: 扩展 worker_df，纳入 entry 中出现但 worker_quality.csv 中没有的 worker
+    if len(new_workers) > 0:
+        print(f"\n[2.5] 扩展 worker_df：添加 {len(new_workers)} 个 entry 中出现的新 worker ...")
+        new_rows = pd.DataFrame({
+            "worker_id": list(new_workers),
+            "worker_quality": [-1.0] * len(new_workers),   # -1 标记为待预测
+            "worker_quality_raw": [-1.0] * len(new_workers),
+        })
+        worker_df = pd.concat([worker_df, new_rows], ignore_index=True)
+        print(f"  worker_df 总行数: {len(worker_df)} (原始 1807 + 新增 {len(new_workers)})")
+
     # ============================================================
     # Step 3: 特征工程
     # ============================================================
@@ -72,6 +90,29 @@ def main():
     project_features_df = build_project_features(
         projects_dict, entries_df, industry_map, global_start_time
     )
+
+    # ============================================================
+    # Step 3.5: Worker Quality 预测（可选）
+    # ============================================================
+    predictor = None
+    if args.quality_mode == "predict":
+        predictor = train_quality_predictor(worker_features_df, verbose=True)
+        worker_features_df = predict_quality(predictor, worker_features_df)
+        # 用预测值覆盖 worker_df 中的 quality（仅对原本无标签的 worker）
+        pred_quality_map = dict(zip(worker_features_df["worker_id"],
+                                     worker_features_df["worker_quality_pred"]))
+        # 记录哪些 worker 原本有标签
+        orig_has_label = worker_features_df["worker_quality_raw"] > 0
+        has_label_map = dict(zip(worker_features_df["worker_id"], orig_has_label))
+        # 对有标签 worker 保留原值，对无标签 worker 用预测值
+        def _get_quality(wid):
+            if has_label_map.get(wid, False):
+                return worker_df.loc[worker_df["worker_id"] == wid, "worker_quality"].values[0]
+            return pred_quality_map.get(wid, 0.5)
+        worker_df["worker_quality"] = worker_df["worker_id"].apply(_get_quality)
+        print(f"  Using ML-predicted quality for rewards")
+    else:
+        print(f"  Using median-filled quality for rewards")
 
     # ============================================================
     # Step 4: 构造 RL 事件流
