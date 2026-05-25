@@ -8,7 +8,7 @@ conda create -n crowdrec python=3.10 -y
 conda activate crowdrec
 pip install -r requirements.txt
 
-# 重跑数据预处理（如需，约 2 分钟）
+# 重跑数据预处理（默认已有，如需重跑，约 2 分钟）
 python main_preprocess.py --output_dir processed --neg_ratio 2.0 --top_k 20
 
 # 查看数据统计
