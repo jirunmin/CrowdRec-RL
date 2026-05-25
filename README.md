@@ -65,9 +65,9 @@ raw data ──→ [data_loader] ──→ [preprocessing] ──→ [features] 
 
 ### 3.3 特征工程 (`src/features.py`)
 
-**Worker 特征 (16维)**：quality, total_entries, total_projects, win_count, win_rate, finalist_count, avg_score, pref_category, pref_sub_category, pref_industry, category_entropy, active_days, first/last_entry
+**Worker 特征**：quality, quality_raw, quality_pred, quality_pred_raw, total_entries, total_projects, win_count, win_rate, finalist_count, avg_score, pref_category, pref_sub_category, pref_industry, category_entropy, active_days, first_entry, last_entry
 
-**Project 特征 (13维)**：category, sub_category, industry_code, entry_count, total_awards, duration_days, is_featured, average_score, worker_count, has_winner
+**Project 特征**：category, sub_category, industry_code, entry_count, total_awards, duration_days, is_featured, average_score, worker_count, has_winner, start_date, deadline
 
 **匹配特征 (4维，向量化计算)**：match_category, match_sub_category, match_industry, match_quality_gap（|worker_quality - project_avg_score/5|）
 
@@ -119,16 +119,50 @@ reward_requester = 2.0×quality + 1.0×winner
 
 ### 4.1 `train_events.parquet` / `val_events.parquet` / `test_events.parquet`
 
-每行 = 一个 (worker, project) 对 + 全部特征 + label + reward。共 **43 列**，详细含义见下方各表。
+每行 = 一个 (worker, project) 对 + 全部特征 + label + reward。共 **45 列**。
 
-**特征列（完整列表）**：
+读取示例：
+```python
+import pandas as pd
 
-#### Worker 特征（16维）—— 来自 `worker_features.parquet` 与事件表 merge
+train = pd.read_parquet("processed/train_events.parquet")
+val   = pd.read_parquet("processed/val_events.parquet")
+test  = pd.read_parquet("processed/test_events.parquet")
+wf    = pd.read_parquet("processed/worker_features.parquet")
+pf    = pd.read_parquet("processed/project_features.parquet")
+cand  = pd.read_parquet("processed/candidates.parquet")
+
+print(train.shape)   # (975195, 45)
+print(train["label"].value_counts())  # 1: 335513, 0: 639682
+print(train.head(1))  # 查看第一行
+```
+
+**一行数据在说什么？** 举两个具体例子：
+
+```
+正样本: worker 1080700 在 2009-05-19 进入了平台，
+        当时有 20 个活跃项目可选，他最终选择了 project 1044773，还中标了。
+        → label=1, reward_worker=3.5, reward_requester=3.0
+
+负样本: worker 1080700 在 2009-05-19 同一时刻，
+        项目 1047045 也在候选池里，但他没有选。
+        → label=0, reward_worker=0,   reward_requester=0
+```
+
+**label**：1 = worker 真实参与了这个项目，0 = 我们构造的负样本（当时活跃但 worker 没选）
+
+**reward**：正样本有正奖励（参与 + 质量 + 中标/入围加分），负样本 reward=0。DQN 的目标就是学会给正样本项目打高分、给负样本打低分。
+
+下面逐列说明：
+
+#### Worker 特征（17列，另含 `worker_quality_wf` merge 重复列可忽略）
 
 | 列名 | 类型 | 含义 |
 |------|------|------|
 | `worker_quality` | float [0,1] | Worker 质量评分（默认 `--quality_mode predict` 为 ML 预测值；`--quality_mode median` 为中位数填充值） |
-| `worker_quality_raw` | float [0,100] | Worker 原始质量评分，-1 = 无标签（用 `worker_quality_pred` 覆盖） |
+| `worker_quality_raw` | float [0,100] | Worker 原始质量评分，-1 = 无标签 |
+| `worker_quality_pred` | float [0,1] | ML 预测的 quality（归一化），有标签 worker 保留原值 |
+| `worker_quality_pred_raw` | float [0,100] | ML 预测的 quality（原始 0-100 尺度） |
 | `worker_total_entries` | float | 该 worker 历史上总共提交的回答数 |
 | `worker_total_projects` | float | 该 worker 历史上参与过的不同项目数 |
 | `worker_win_count` | float | 累计中标次数（winner=True） |
@@ -145,7 +179,7 @@ reward_requester = 2.0×quality + 1.0×winner
 
 > **注意**：`worker_total_entries` / `worker_win_count` 等动态特征是**从全部历史数据统计的全局值**，而非事件发生时刻的快照。如需时序增量特征需在环境中自行维护。
 
-#### Project 特征（13维）—— 来自 `project_features.parquet` 与事件表 merge
+#### Project 特征（12列）
 
 | 列名 | 类型 | 含义 |
 |------|------|------|
@@ -186,12 +220,13 @@ reward_requester = 2.0×quality + 1.0×winner
 
 | 列名 | 类型 | 含义 |
 |------|------|------|
-| `event_id` | int | 全局事件序号，按时序递增，跨 train/val/test 唯一 |
-| `worker` | int | Worker ID（可 join `worker_features.parquet`） |
-| `project_id` | int | Project ID（可 join `project_features.parquet`） |
+| `event_id` | int | 全局事件序号，按时序递增 |
+| `worker` | int | Worker ID |
+| `project_id` | int | Project ID |
 | `timestamp` | datetime | 事件时间（worker 到达时间，UTC 时区） |
 | `day_index` | int | 从首个事件起的天数偏移量 |
-| `split` | str | "Train" / "Val" / "Test" |
+
+> `split` 列仅在 `pd.concat([train, val, test])` 后出现。`worker_quality_wf` 是 merge 产生的重复列，可忽略。
 
 ### 4.2 `worker_features.parquet` / `project_features.parquet`
 
@@ -211,127 +246,7 @@ Worker/Project 的**静态特征查找表**，用于环境中构造 state。
 
 ---
 
-## 5. 实现 RL 环境 (`env.py`)
-
-### 5.1 环境基本框架
-
-```python
-class CrowdRecEnv:
-    def __init__(self, events_df, worker_features, project_features,
-                 candidates_df=None, reward_mode="worker"):
-        """
-        reward_mode: "worker" 或 "requester"
-        """
-        self.events = events_df.sort_values("timestamp")
-        self.current_idx = 0
-        ...
-
-    def reset(self):
-        """重置到数据集起点，返回第一个 state"""
-        ...
-
-    def step(self, action):
-        """
-        action: 推荐的 project_id (int)
-        返回: (next_state, reward, done, info)
-        """
-        ...
-```
-
-### 5.2 State 设计建议
-
-State 是当前决策点 agent 能看到的信息。建议结构：
-
-```
-state = {
-    # 当前 worker 特征（静态 + 动态）
-    "worker_quality": 0.82,
-    "worker_total_entries": 45,
-    "worker_pref_category": 7,
-    "worker_win_rate": 0.12,
-    ...
-
-    # 候选池中每个 project 的特征（向量）
-    "candidate_features": [[...], [...], ...],   # shape: (K, N_project_features)
-
-    # 全局上下文
-    "day_index": 1234,
-    "n_active_projects": 20,
-}
-```
-
-**状态转移**：当前事件 → 下一个事件。worker 特征会随历史累积而更新（如 `worker_total_entries` 增加）。
-
-### 5.3 Action 设计
-
-- **离散动作空间**：大小为 K（候选项目数），每个动作对应选择一个 project_id
-- 如果候选池大小 < K，用 mask 遮蔽无效动作
-- 只从 `candidate_projects` 列表中选（保证逻辑合理）
-
-### 5.4 Reward 设计
-
-两个模式，分别对应题目要求：
-
-**模式 1: worker_reward（最大化参与者利益）**
-```python
-# 直接用数据中的 reward_worker 列
-reward = event["reward_worker"]  # 范围 [0, 4.5]
-```
-
-**模式 2: requester_reward（最大化请求者利益）**
-```python
-# 直接用数据中的 reward_requester 列
-reward = event["reward_requester"]  # 范围 [0, 3.0]
-```
-
-也可以自行设计更复杂的 reward 函数，但必须保证：
-- 正样本 reward > 负样本 reward（正样本 reward 通常 > 1.0，负样本 = 0）
-
-### 5.5 Next State & Done
-
-- **Next State**：下一个事件的 state
-- **Done**：到达数据集末尾（最后一个事件被处理后）
-
-### 5.6 数据读取方式
-
-```python
-import pandas as pd
-
-# 加载
-train = pd.read_parquet("processed/train_events.parquet")
-workers = pd.read_parquet("processed/worker_features.parquet")
-projects = pd.read_parquet("processed/project_features.parquet")
-candidates = pd.read_parquet("processed/candidates.parquet")
-
-# 按时间排序
-train = train.sort_values("timestamp").reset_index(drop=True)
-
-# 逐行遍历
-for idx, event in train.iterrows():
-    state = build_state(event, workers, projects, candidates)
-    action = agent.act(state)
-    # 根据 action 对应的 project_id 判断是否命中正样本
-    ...
-```
-
-### 5.7 Random 策略验证要求
-
-必须能在环境中跑通 Random 策略：
-```python
-total_reward = 0
-state = env.reset()
-done = False
-while not done:
-    action = np.random.choice(state["candidate_ids"])  # 随机选一个候选
-    next_state, reward, done, info = env.step(action)
-    total_reward += reward
-    state = next_state
-print(f"Random policy total reward: {total_reward}")
-```
-
----
-
-## 6. 项目文件结构
+## 5. 项目文件结构
 
 ```
 CrowdRec-RL/
@@ -344,7 +259,7 @@ CrowdRec-RL/
 │   ├── candidates.parquet     # Top-20 候选
 │   └── stats.json
 ├── figures/                   # 数据统计图表（8 张）
-├── src/                       # 预处理代码（已完成，一般不需改动）
+├── src/                       # 预处理代码
 │   ├── data_loader.py
 │   ├── preprocessing.py
 │   ├── features.py
@@ -353,7 +268,7 @@ CrowdRec-RL/
 │   └── dataset.py
 ├── main_preprocess.py         # 预处理入口
 ├── plot_stats.py              # 统计图表入口
-├── sample_read_data.py        # 助教参考代码（已修正 header bug）
+├── sample_read_data.py        # 参考代码
 ├── requirements.txt           # Python 依赖（pip install -r requirements.txt）
 ├── worker_quality.csv
 ├── project_list.csv
@@ -363,7 +278,7 @@ CrowdRec-RL/
 
 ---
 
-## 7. 数据特点
+## 6. 数据特点
 
 1. **时序严格**：数据不能 shuffle，train/val/test 是按时间切好的，训练时也要按时间顺序
 2. **前几个事件候选为空**：最早的事件发生时，平台上还没有活跃项目，candidates=[]，需要在代码中处理
