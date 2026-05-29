@@ -299,6 +299,7 @@ class CrowdRecEnv:
         shuffle_rng = np.random.default_rng(self.cfg.seed)
 
         # groupby preserves order due to sort_values above.
+        rng = np.random.default_rng(self.cfg.seed)
         for (worker, timestamp), group in df.groupby(["worker", "timestamp"], sort=False):
             cand_pids = group["project_id"].to_numpy()
             labels = group["label"].to_numpy(dtype=np.int8)
