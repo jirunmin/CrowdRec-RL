@@ -1,0 +1,71 @@
+[
+  {
+    "method_name": "Random",
+    "split": "test",
+    "reward_mode": "worker",
+    "results": {
+      "total_reward": 34132.98419821262,
+      "avg_reward": 0.49820446342556957,
+      "hit_rate": 0.33227755721625407,
+      "std_reward": 0.0,
+      "min_reward": 34132.98419821262,
+      "max_reward": 34132.98419821262,
+      "total_steps": 68512,
+      "n_episodes": 1,
+      "hit_rate_1": 0.33227755721625407,
+      "hit_rate_5": 0.33227755721625407,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.33227755721625407,
+      "total_samples": 68512
+    },
+    "evaluation_time_seconds": 211.22978,
+    "timestamp": "2026-05-29T17:04:05.619522"
+  },
+  {
+    "method_name": "Greedy-Worker",
+    "split": "test",
+    "reward_mode": "worker",
+    "results": {
+      "total_reward": 57347.34317135811,
+      "avg_reward": 0.837040856658076,
+      "hit_rate": 0.5622372723026623,
+      "std_reward": 0.0,
+      "min_reward": 57347.34317135811,
+      "max_reward": 57347.34317135811,
+      "total_steps": 68512,
+      "n_episodes": 1,
+      "hit_rate_1": 0.5622372723026623,
+      "hit_rate_5": 0.5622372723026623,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.5622372723026623,
+      "total_samples": 68512
+    },
+    "evaluation_time_seconds": 212.705225,
+    "timestamp": "2026-05-29T17:07:38.324939"
+  },
+  {
+    "method_name": "Greedy-Requester",
+    "split": "test",
+    "reward_mode": "worker",
+    "results": {
+      "total_reward": 56870.950070381165,
+      "avg_reward": 0.830087430966563,
+      "hit_rate": 0.5576395375992527,
+      "std_reward": 0.0,
+      "min_reward": 56870.950070381165,
+      "max_reward": 56870.950070381165,
+      "total_steps": 68512,
+      "n_episodes": 1,
+      "hit_rate_1": 0.5576395375992527,
+      "hit_rate_5": 0.5576395375992527,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.5576395375992527,
+      "total_samples": 68512
+    },
+    "evaluation_time_seconds": 200.994242,
+    "timestamp": "2026-05-29T17:10:59.319413"
+  }
+]

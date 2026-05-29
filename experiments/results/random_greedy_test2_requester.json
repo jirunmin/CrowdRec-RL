@@ -1,0 +1,71 @@
+[
+  {
+    "method_name": "Random",
+    "split": "test",
+    "reward_mode": "requester",
+    "results": {
+      "total_reward": 5978.313259780407,
+      "avg_reward": 0.09522488109110092,
+      "hit_rate": 0.05181503958203915,
+      "std_reward": 0.0,
+      "min_reward": 5978.313259780407,
+      "max_reward": 5978.313259780407,
+      "total_steps": 62781,
+      "n_episodes": 1,
+      "hit_rate_1": 0.051815864925135395,
+      "hit_rate_5": 0.051815864925135395,
+      "ndcg_1": 0.0,
+      "ndcg_5": 0.0,
+      "mrr": 0.05181503958203915,
+      "total_samples": 62781
+    },
+    "evaluation_time_seconds": 198.588385,
+    "timestamp": "2026-05-29T17:44:31.120604"
+  },
+  {
+    "method_name": "Greedy-Worker",
+    "split": "test",
+    "reward_mode": "requester",
+    "results": {
+      "total_reward": 21635.608482420444,
+      "avg_reward": 0.34462032274765364,
+      "hit_rate": 0.1892770105605199,
+      "std_reward": 0.0,
+      "min_reward": 21635.608482420444,
+      "max_reward": 21635.608482420444,
+      "total_steps": 62781,
+      "n_episodes": 1,
+      "hit_rate_1": 0.1892800254858235,
+      "hit_rate_5": 0.1892800254858235,
+      "ndcg_1": 0.0,
+      "ndcg_5": 0.0,
+      "mrr": 0.1892770105605199,
+      "total_samples": 62781
+    },
+    "evaluation_time_seconds": 203.524168,
+    "timestamp": "2026-05-29T17:47:54.644967"
+  },
+  {
+    "method_name": "Greedy-Requester",
+    "split": "test",
+    "reward_mode": "requester",
+    "results": {
+      "total_reward": 20649.48294866085,
+      "avg_reward": 0.32891293462450183,
+      "hit_rate": 0.18008633185199344,
+      "std_reward": 0.0,
+      "min_reward": 20649.48294866085,
+      "max_reward": 20649.48294866085,
+      "total_steps": 62781,
+      "n_episodes": 1,
+      "hit_rate_1": 0.18008920038228735,
+      "hit_rate_5": 0.18008920038228735,
+      "ndcg_1": 0.0,
+      "ndcg_5": 0.0,
+      "mrr": 0.18008633185199344,
+      "total_samples": 62781
+    },
+    "evaluation_time_seconds": 202.807859,
+    "timestamp": "2026-05-29T17:51:17.453071"
+  }
+]

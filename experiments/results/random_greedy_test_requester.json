@@ -1,0 +1,71 @@
+[
+  {
+    "method_name": "Random",
+    "split": "test",
+    "reward_mode": "requester",
+    "results": {
+      "total_reward": 41431.93619656563,
+      "avg_reward": 0.6047398440647715,
+      "hit_rate": 0.33227755721625407,
+      "std_reward": 0.0,
+      "min_reward": 41431.93619656563,
+      "max_reward": 41431.93619656563,
+      "total_steps": 68512,
+      "n_episodes": 1,
+      "hit_rate_1": 0.33227755721625407,
+      "hit_rate_5": 0.33227755721625407,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.33227755721625407,
+      "total_samples": 68512
+    },
+    "evaluation_time_seconds": 207.689134,
+    "timestamp": "2026-05-29T17:04:07.095535"
+  },
+  {
+    "method_name": "Greedy-Worker",
+    "split": "test",
+    "reward_mode": "requester",
+    "results": {
+      "total_reward": 69775.37173110247,
+      "avg_reward": 1.0184401525441158,
+      "hit_rate": 0.5622372723026623,
+      "std_reward": 0.0,
+      "min_reward": 69775.37173110247,
+      "max_reward": 69775.37173110247,
+      "total_steps": 68512,
+      "n_episodes": 1,
+      "hit_rate_1": 0.5622372723026623,
+      "hit_rate_5": 0.5622372723026623,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.5622372723026623,
+      "total_samples": 68512
+    },
+    "evaluation_time_seconds": 212.710046,
+    "timestamp": "2026-05-29T17:07:39.805770"
+  },
+  {
+    "method_name": "Greedy-Requester",
+    "split": "test",
+    "reward_mode": "requester",
+    "results": {
+      "total_reward": 69235.79932403564,
+      "avg_reward": 1.010564562763248,
+      "hit_rate": 0.5576395375992527,
+      "std_reward": 0.0,
+      "min_reward": 69235.79932403564,
+      "max_reward": 69235.79932403564,
+      "total_steps": 68512,
+      "n_episodes": 1,
+      "hit_rate_1": 0.5576395375992527,
+      "hit_rate_5": 0.5576395375992527,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.5576395375992527,
+      "total_samples": 68512
+    },
+    "evaluation_time_seconds": 200.56068,
+    "timestamp": "2026-05-29T17:11:00.366670"
+  }
+]
