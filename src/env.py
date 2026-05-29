@@ -164,6 +164,22 @@ class CrowdRecEnv:
         self.worker_features: pd.DataFrame = self._load_parquet(cfg.worker_features_path)
         self.project_features: pd.DataFrame = self._load_parquet(cfg.project_features_path)
 
+        # Reconcile worker_quality with the value A's reward pipeline actually used.
+        # A keeps `worker_quality = -1` in worker_features.parquet for unlabeled
+        # workers (~85% of the table), but writes the ML-predicted quality
+        # (`worker_quality_pred`) into the event rows and rewards. If we read
+        # `worker_quality` straight from the feature table, the env state would
+        # report -1 for those workers and match_quality_gap would diverge from
+        # the parquet match_quality_gap column. Prefer `worker_quality_pred`
+        # whenever it is available.
+        if "worker_quality_pred" in self.worker_features.columns:
+            pred = self.worker_features["worker_quality_pred"]
+            raw = self.worker_features["worker_quality"]
+            # Use predicted value where raw is missing (< 0 = unlabeled).
+            self.worker_features = self.worker_features.assign(
+                worker_quality=raw.where(raw >= 0, pred)
+            )
+
         # Index lookup tables for fast feature retrieval.
         self._worker_idx = self.worker_features.set_index("worker_id")
         self._project_idx = self.project_features.set_index("project_id")
@@ -264,18 +280,35 @@ class CrowdRecEnv:
         return self._build_steps_top_k()
 
     def _build_steps_event_group(self) -> List[Dict[str, Any]]:
-        """One step per (worker, timestamp) group; candidates = group rows."""
-        df = self.events_df.sort_values(["timestamp", "worker", "label"],
-                                         ascending=[True, True, False])
+        """One step per (worker, timestamp) group; candidates = group rows.
+
+        Within each group we deterministically shuffle the candidate order so
+        that the positive sample is NOT systematically at index 0. Otherwise a
+        DQN can exploit the dataset by always picking action 0 and reach a
+        spuriously high hit rate.
+        """
+        # NOTE: do NOT sort by `label` — that biases gt_index to 0.
+        df = self.events_df.sort_values(["timestamp", "worker"],
+                                         ascending=[True, True])
         steps: List[Dict[str, Any]] = []
 
         reward_col = pick_precomputed_column(self.cfg.reward_mode)
+
+        # Independent RNG seeded from cfg.seed so shuffles are reproducible
+        # across runs and unaffected by the random_policy RNG.
+        shuffle_rng = np.random.default_rng(self.cfg.seed)
 
         # groupby preserves order due to sort_values above.
         for (worker, timestamp), group in df.groupby(["worker", "timestamp"], sort=False):
             cand_pids = group["project_id"].to_numpy()
             labels = group["label"].to_numpy(dtype=np.int8)
             rewards = group[reward_col].to_numpy(dtype=np.float32)
+
+            # Per-group permutation – deterministic given cfg.seed.
+            perm = shuffle_rng.permutation(len(cand_pids))
+            cand_pids = cand_pids[perm]
+            labels = labels[perm]
+            rewards = rewards[perm]
 
             # Ground truth = the row with label==1 (there is at most one in 99.999% of cases).
             pos_indices = np.flatnonzero(labels == 1)
@@ -418,14 +451,25 @@ class CrowdRecEnv:
         return arr
 
     def _match_block(self, worker_id: int, project_ids: np.ndarray) -> np.ndarray:
+        # Pull worker preference fields. NOTE: do NOT use ``x or default`` here —
+        # ``0.0 or -1`` evaluates to -1 in Python (0.0 is falsy), which would
+        # silently break match_industry for the ~37% of workers whose
+        # pref_industry happens to be the integer code 0 (e.g. healthcare).
+        # Always check pd.isna explicitly.
         try:
             w_row = self._worker_idx.loc[worker_id]
             if isinstance(w_row, pd.DataFrame):
                 w_row = w_row.iloc[0]
-            w_pref_cat = float(w_row.get("worker_pref_category", -1) or -1)
-            w_pref_sub = float(w_row.get("worker_pref_sub_category", -1) or -1)
-            w_pref_ind = float(w_row.get("worker_pref_industry", -1) or -1)
-            w_q = float(w_row.get("worker_quality", 0.5) or 0.5)
+
+            def _coerce(v: Any, default: float) -> float:
+                if v is None or (isinstance(v, float) and np.isnan(v)) or pd.isna(v):
+                    return default
+                return float(v)
+
+            w_pref_cat = _coerce(w_row.get("worker_pref_category", -1), -1.0)
+            w_pref_sub = _coerce(w_row.get("worker_pref_sub_category", -1), -1.0)
+            w_pref_ind = _coerce(w_row.get("worker_pref_industry", -1), -1.0)
+            w_q = _coerce(w_row.get("worker_quality", 0.5), 0.5)
         except KeyError:
             w_pref_cat = w_pref_sub = w_pref_ind = -1.0
             w_q = 0.5
