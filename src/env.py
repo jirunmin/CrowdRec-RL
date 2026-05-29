@@ -272,10 +272,19 @@ class CrowdRecEnv:
         reward_col = pick_precomputed_column(self.cfg.reward_mode)
 
         # groupby preserves order due to sort_values above.
+        rng = np.random.default_rng(self.cfg.seed)
         for (worker, timestamp), group in df.groupby(["worker", "timestamp"], sort=False):
             cand_pids = group["project_id"].to_numpy()
             labels = group["label"].to_numpy(dtype=np.int8)
             rewards = group[reward_col].to_numpy(dtype=np.float32)
+
+            # Shuffle candidates within each group to avoid positional bias.
+            n = len(cand_pids)
+            if n > 1:
+                perm = rng.permutation(n)
+                cand_pids = cand_pids[perm]
+                labels = labels[perm]
+                rewards = rewards[perm]
 
             # Ground truth = the row with label==1 (there is at most one in 99.999% of cases).
             pos_indices = np.flatnonzero(labels == 1)
