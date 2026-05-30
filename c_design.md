@@ -1,219 +1,237 @@
+# C 部分交付：基础 DQN 实现（当前代码同步版）
 
-# C 部分交付：基础DQN实现
+覆盖以下核心文件，在c_basic_dqn中：
+- `train.py`
+- `agent_dqn.py`
+- `test.py`
+- `basicdqn_plot_curve.py`
+- best模型保存`basic_dqn_best_requester_model.pth`、`basic_dqn_best_worker_model.pth`
+- 训练数据 `train_log_worker_per_5000_steps.csv`、`train_log_worker_per_episode.csv`、     `train_log_requester_per_5000_steps.csv`、`basic_dqn_best_requester_model.pth`
+- 训练曲线 `worker_episode_loss.png`（以episode为单位的折线图）、`worker_episode_reward.png`（以episode为单位的reward折线图）、`worker_step_loss_epsilon.png`（以全局step为单位的epsilon、loss折线图）、`worker_step_reward.png`（以全局step为单位的reward折线图）；`requester_episode_loss.png`（以episode为单位的折线图）、`requester_episode_reward.png`（以episode为单位的reward折线图）、`rworker_episode_success_rate.png`(以episode为单位的success_rate折线图)、`worker_step_success_rate.png`（以全局step为单位的success_rate折线图）；`requester_step_loss_epsilon.png`（以全局step为单位的epsilon、loss折线图）、`requester_step_reward.png`（以全局step为单位的reward折线图）、`requester_episode_success_rate.png`(以episode为单位的success_rate折线图)、`requester_step_success_rate.png`（以全局step为单位的success_rate折线图）
+测试结果 Worker score: 65615.6864、Requester score: 80174.7314。柱状图：`final_comparison.png`
 
-> 对应 `task_division.md` 中 C 角色的全部交付物：在文件c_basic_dqn中
->
-> - `train.py`、`agent_dqn.py`、`test.py` 
-> - `basicdqn_plot_curve.py`
-> - best模型保存`basic_dqn_best_requester_model.pth`、`basic_dqn_best_worker_model.pth`
-> - 训练数据 `train_log_worker_per_5000_steps.csv`、`train_log_worker_per_episode.csv`、     `train_log_requester_per_5000_steps.csv`、`basic_dqn_best_requester_model.pth`
-> - 训练曲线 `worker_episode_loss.png`（以episode为单位的折线图）、`worker_episode_reward.png`（以episode为单位的reward折线图）、`worker_step_loss_epsilon.png`（以全局step为单位的epsilon、loss折线图）、`worker_step_reward.png`（以全局step为单位的reward折线图）；`requester_episode_loss.png`（以episode为单位的折线图）、`requester_episode_reward.png`（以episode为单位的reward折线图）、`requester_step_loss_epsilon.png`（以全局step为单位的epsilon、loss折线图）、`requester_step_reward.png`（以全局step为单位的reward折线图）
-> - 测试结果 Worker score: 101804.3550、Requester score: 123326.7930。柱状图：`final_comparison.png`
-
----
-
-## 1. 整体流程概览
-
-项目采用标准 DQN 流程：
-1. 环境给出观测 `obs`（包含 `worker_state`、`candidate_state`、`valid_mask`）。
-2. `obs_to_state` 将观测拼接为一维状态向量。
-3. `DQNAgent.select_action` 基于 ε-greedy 与 `valid_mask` 选动作。
-4. 与环境交互后，把转移样本写入经验池。
-5. 经验池达到预热阈值后，开始 `update()` 训练 Q 网络。
-6. 周期性硬更新目标网络，稳定训练。
-7. 每个 episode 结束在验证集评估，若更优则保存最优模型。
+并说明与环境侧 `fastenv` 的交互方式（训练/验证/测试统一使用归一化环境）。
 
 ---
 
-## 2. 三个类的设计（`agent_dqn.py`）
+## 1. 总体流程
 
-## 2.1 `ReplayBuffer`
-
-### 职责
-- 存储离线经验样本 `(state, action, reward, next_state, done)`
-- 随机采样 mini-batch，打破样本时间相关性
-
-### 关键实现
-- 底层使用 `deque(maxlen=capacity)` 控制容量上限
-- `push(...)`：写入新样本，自动淘汰最旧样本
-- `sample(batch_size)`：随机无放回采样，返回张量
-- `__len__()`：返回当前样本数量
-
-### 输入/输出约定
-- `state/next_state` 转 `np.float32`
-- `actions` 输出为 `LongTensor`，并 `unsqueeze(1)` 以适配 `gather`
-- `rewards/dones` 输出为 `FloatTensor` 且形状 `[B, 1]`
+当前项目采用标准 DQN 训练闭环：
+1. 环境返回观测 `obs`，包含：
+   - `worker_state`
+   - `candidate_state`
+   - `valid_mask`
+2. `obs_to_state` 将 `worker_state` 与 `candidate_state` 展平并拼接为一维向量。
+3. Agent 使用带 `valid_mask` 的 ε-greedy 选择动作。
+4. 与环境交互后，将转移存入经验回放池。
+5. 经验池达到预热阈值后开始参数更新。
+6. 周期性同步目标网络。
+7. 每个 episode 结束在验证集评估：
+   - `val_reward`
+   - `val_success_rate`
+8. 基于验证指标执行早停，并在 `val_reward` 提升时保存最佳模型。
 
 ---
 
-## 2.2 `QNetwork`
+## 2. 环境接入（train/test 与 fastenv）
 
-### 职责
-- 从状态向量映射到每个动作的 Q 值
+`train.py` 与 `test.py` 均已切换到：
+- `from src.fastenv import make_fast_env`
 
-### 结构
-- 默认多层感知机（MLP）：
-  - 输入层：`state_dim`
-  - 隐藏层：`[128, 128]`，激活函数 `ReLU`
-  - 输出层：`action_dim`
+并统一使用：
+- `normalize_features=True`
 
-
-
-### 前向
-- `forward(x)` 返回 `self.net(x)`
-- 支持 batch 输入（形状通常 `[B, state_dim]`）
+这意味着：
+- 训练/验证/测试使用同一套状态预处理口径；
+- 归一化统计由环境侧处理（非 `train.py` 内部处理）；
+- `train.py` 本身仅做状态拼接，不自行计算均值/标准差。
 
 ---
 
-## 2.3 `DQNAgent`
+## 3. `agent_dqn.py` 设计
 
-### 职责
-封装 DQN 训练与推理核心逻辑：
-- 动作选择（含动作 mask）
-- 经验存储
-- 网络更新
-- 目标网络同步
+### 3.1 ReplayBuffer
+
+职责：存储并随机采样经验。
+
+- 数据结构：`deque(maxlen=capacity)`
+- 单条样本：
+  - `(state, action, reward, next_state, next_valid_mask, done)`
+- 采样输出：
+  - `states`: `FloatTensor [B, state_dim]`
+  - `actions`: `LongTensor [B, 1]`
+  - `rewards`: `FloatTensor [B, 1]`
+  - `next_states`: `FloatTensor [B, state_dim]`
+  - `next_valid_masks`: `BoolTensor [B, action_dim]`
+  - `dones`: `FloatTensor [B, 1]`
+
+### 3.2 QNetwork
+
+- 结构：MLP，默认隐藏层 `[128, 128]` + ReLU
+- 输入：`state_dim`
+- 输出：`action_dim`（每个动作一个 Q 值）
+
+### 3.3 DQNAgent
+
+核心能力：
+- 自动设备选择（`auto` -> CUDA 可用则 GPU）
+- 线性 ε 衰减（按全局步数）
+- 合法动作掩码决策（`valid_mask`）
+- DQN 更新（在线网 + 目标网）
+- 梯度裁剪
 - 模型保存/加载
 
-### 核心成员
-- `q_net`：主网络（用于行为与学习）
-- `target_net`：目标网络（用于 TD 目标）
-- `optimizer`：`Adam`
-- `replay_buffer`：经验池
-- `epsilon`：探索率
-- `device`：`cpu` 或 `cuda`
+#### 动作选择
+- 训练：ε-greedy
+- 评估：贪心（`eval_mode=True`）
+- 若提供 `valid_mask`：仅在合法动作中取 `argmax`
 
-### 关键方法
-
-#### 1) `select_action(state, valid_mask=None, eval_mode=False)`
-- 训练时：ε-greedy，带衰减率
-- 测试时：贪心（`eval_mode=True`）
-- `valid_mask` 用于屏蔽非法动作：
-  - 将非法动作 Q 值设为 `-inf`
-  - 在合法动作中 `argmax`
-
-#### 2) `update()`
-- 前提：经验池长度不少于 `batch_size`
-- TD 目标：
+#### 更新公式
 \[
-y = r + \gamma \max_{a'} Q_{\theta^-}(s', a') \cdot (1-d)
+y = r + \gamma \cdot \max_{a'} Q_{target}(s',a') \cdot (1-d)
 \]
-- 当前值：
-\[
-Q_{\theta}(s,a)
-\]
-- 损失：`MSELoss(current_q, target_q)`
-- 反向传播 + 梯度裁剪（`clip_grad_norm_`）
-- `epsilon` 按衰减系数递减到下限
-- 每 `target_update_freq` 步进行一次硬更新：
-  - `target_net <- q_net`
 
-#### 3) `store_transition(...)`
-- 写入经验池
-
-#### 4) `save_model(path)` / `load_model(path)`
-- 只保存/加载在线网络权重
-- 加载后同步目标网络
+- 对 `next_valid_masks` 做非法动作屏蔽（置 `-inf`）
+- 若某样本下一步无合法动作，则该样本 `next_q` 置 0
+- 损失：`MSE(current_q, target_q)`
 
 ---
 
-## 3. 训练脚本设计（`train.py`）
+## 4. `train.py` 训练脚本（当前实现）
 
-## 3.1 关键固定配置
-- `WARMUP_STEPS = 3000`：经验池预热阈值
-- `SEED = 42`：随机种子
+### 4.1 关键常量
+
+- `WARMUP_STEPS = 3000`
+- `STEP_LOG_INTERVAL = 5000`
+- `REWARD_SCALE = 20.0`
+- `EPSILON_DECAY_STEPS = 1_675_000`
+- `TARGET_UPDATE_FREQ = 2000`
+- `EVAL_EPISODES = 3`
+- `SEED = 42`
 - `CANDIDATE_MODE = "event_group"`
 
-## 3.2 训练入口参数
-- `--device`: `auto | cpu | cuda`（默认 `auto`）
-- `--episodes`: 默认 `3`
+### 4.2 早停机制（已改为验证指标）
 
-## 3.3 设备与 batch size 策略
-- `auto` 时自动选择可用 GPU，否则 CPU
-- CPU 训练时自适应增大 batch size：
-  - 核心数 >= 16：至少 256
-  - 核心数 >= 8：至少 128
-  - 其它：至少 64
+- `EARLY_STOP_PATIENCE = 5`
+- `VAL_METRIC_MIN_DELTA = 0.002`
+- `EARLY_STOP_METRIC = "val_reward"`（可切为 `val_success_rate`）
 
-## 3.4 Agent 初始化参数
-当前训练脚本给定：
-- `lr=5e-4`
-- `epsilon_decay=0.995`
-- `batch_size=resolved_batch_size`（由设备策略确定）
+逻辑：
+- 每个 episode 结束后评估验证集；
+- 取监控指标：
+  - 若 `EARLY_STOP_METRIC = "val_reward"`，监控 `val_reward`；
+  - 若 `EARLY_STOP_METRIC = "val_success_rate"`，监控 `val_success_rate`；
+- 若本轮提升不超过 `VAL_METRIC_MIN_DELTA`，记一次“无明显提升”；
+- 连续达到 `EARLY_STOP_PATIENCE` 后提前停止。
 
-Agent 其余默认超参（来自 `DQNAgent`）：
-- `gamma=0.99`
-- `epsilon_start=1.0`采用线性epsilon
-- `buffer_capacity=400000`
-- `target_update_freq=500`
-- `grad_clip_norm=20.0`
+### 4.3 训练流程
 
-## 3.5 训练过程细节
-1. 每个 `reward_mode`（`worker`、`requester`）分别训练
-2. episode 内循环：交互、存经验、预热后更新网络
-3. 预热阶段打印经验池进度（每 5%）
-4. 每累计 5000 环境步打印一次全局步数
-5. 每个 episode 后：
-   - 在 `val` 集评估，一次跑3个episode取平均值
-   - 若验证 reward 创新高，保存最优模型
-6. 保存训练日志到：
-   - `train_log_worker_per_5000_steps.csv`、`train_log_worker_per_episode.csv`
-   - `train_log_requester_per_5000_steps.csv`、`train_log_requester_per_episode.csv`
+1. 创建训练环境：`make_fast_env(split="train", normalize_features=True, ...)`
+2. 初始化 Agent（含 batch size 与设备策略）
+3. episode 循环：
+   - 交互采样
+   - 回放池预热（输出 warmup 进度）
+   - 预热后调用 `agent.update()`
+   - 每 5000 全局步记录 step 日志
+4. episode 结束后：
+   - 计算训练侧 `reward/loss/success_rate`
+   - 调用 `evaluate_model(..., split="val")`
+   - 如 `val_reward` 提升则保存最佳模型
+   - 执行验证指标早停判定
 
-## 3.6 输出模型
-- `basic_dqn_best_worker_model.pth`
-- `basic_dqn_best_requester_model.pth`
+### 4.4 success_rate 指标
 
----
+当前已在训练与验证侧启用：
+- 统计口径：
+  - 当 `ground_truth_index >= 0` 记为有效 step；
+  - `info["hit"]` 计入命中；
+  - `success_rate = hits / valid_steps`。
 
-## 4. 测试脚本设计（`test.py`）
+### 4.5 日志输出
 
-## 4.1 入口参数
-- `--device`: `auto | cpu | cuda`（默认 `auto`）
+#### Step 日志（每 5000 步）
+文件：`train_log_{reward_mode}_per_5000_steps.csv`
 
-## 4.2 测试流程
-1. 创建 `split="test"` 环境
-2. 实例化 `DQNAgent` 并加载模型
-3. `eval_mode=True` 下执行贪心策略
-4. 累加整局 reward，输出最终分数
-5. 分别测试 worker / requester 模型
-6. 生成柱状图：`final_comparison.png`
+字段包含：
+- `global_step`
+- `episode`
+- `episode_inner_step`
+- `buffer_size`
+- `epsilon`
+- `episode_reward_so_far`
+- `episode_avg_loss_so_far`
+- `episode_success_rate_so_far`
 
-## 4.3 测试输出
-- 控制台打印：
-  - 实际评估设备
-  - `Worker score`
-  - `Requester score`
-- 图像文件：`final_comparison.png`
+#### Episode 日志
+文件：`train_log_{reward_mode}_per_episode.csv`
 
----
+字段包含：
+- `reward`
+- `loss`
+- `success_rate`
+- `eps`
 
-## 5. Q 网络的基础设计说明（简明）
+### 4.6 训练参数与 CLI
 
-当前 Q 网络是一个轻量级 MLP，适合中小规模离散动作场景：
-- 两层 128 隐藏单元可以在表达能力与训练稳定性间取得平衡。
-- 输出层直接预测每个动作 Q 值，便于配合 `argmax` 选动作。
-- 在本项目中，`valid_mask` 机制保证只在合法候选动作中决策。
+支持参数：
+- `--device {auto,cpu,cuda}`
+- `--episodes <int>`
+- `--reward-mode {worker,requester,both}`
+- `--early-stop-metric {val_reward,val_success_rate}`
 
-若后续需要提升效果，可考虑：
-- 增大隐藏维度（如 256/256）
-- Double DQN（缓解 Q 值过估计）
-- Dueling 结构（价值/优势分解）
-- Prioritized Replay（提升样本效率）
+说明：
+- `both` 会顺序训练 `worker` 与 `requester`。
 
 ---
 
-## 6. 当前参数小结（可复现实验）
+## 5. `test.py` 评估脚本（当前实现）
 
-推荐命令：
+### 5.1 环境
+
+- 使用 `make_fast_env(split="test", normalize_features=True, ...)`
+- 与训练阶段预处理口径一致。
+
+### 5.2 测试流程
+
+1. 加载指定模型权重；
+2. `eval_mode=True` 贪心选动作；
+3. 累加整局奖励为最终得分；
+4. 分别评估：
+   - `basic_dqn_best_worker_model.pth`
+   - `basic_dqn_best_requester_model.pth`
+5. 输出柱状图：`final_comparison.png`
+
+### 5.3 CLI
+
+- `--device {auto,cpu,cuda}`
+
+---
+
+## 6. 当前实现特性与说明
+
+1. **训练脚本不自行归一化**：归一化由环境层处理。
+2. **验证指标早停**：相比按训练 loss 早停，更贴近泛化目标。
+3. **模型保存策略**：当前按 `val_reward` 最优保存 best checkpoint。
+4. **动作合法性约束**：训练/评估全程基于 `valid_mask`，避免选择非法候选。
+
+---
+
+## 7. 复现示例
+
+训练（两个 reward 模式）：
 
 ```bash
-python train.py --device cpu --episodes 6
-python test.py --device cpu
+python train.py --device cpu --episodes 20 --reward-mode both --early-stop-metric val_reward
 ```
 
-该配置下：
-- 训练 6 个 episode（每个 reward_mode 各 6 轮）
-- 经验池预热 3000 样本后开始更新
-- 每 5000 步打印一次全局步数
-- 每个 episode 结束依据验证集表现保存最优模型
+若希望按成功率早停：
+
+```bash
+python train.py --device cpu --episodes 20 --reward-mode both --early-stop-metric val_success_rate
+```
+
+测试：
+
+```bash
+python test.py --device cpu
+```

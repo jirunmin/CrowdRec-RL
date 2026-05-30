@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from src.env import make_env
+from src.fastenv import make_fast_env
 from agent_dqn import DQNAgent
 
 SEED = 42
@@ -28,11 +28,12 @@ def obs_to_state(obs):
 
 
 def evaluate(reward_mode, model_path, device="auto"):
-    env = make_env(
+    env = make_fast_env(
         split="test",
         reward_mode=reward_mode,
         candidate_mode=CANDIDATE_MODE,
         seed=SEED,
+        normalize_features=True,
     )
     agent = DQNAgent(state_dim=env.state_dim, action_dim=env.max_candidates, device=device)
     agent.load_model(model_path)
