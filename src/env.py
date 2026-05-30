@@ -112,7 +112,7 @@ class EnvConfig:
                         Contains all (positive + negative) events for the split.
         worker_features_path: Worker static feature parquet.
         project_features_path: Project static feature parquet.
-        candidates_path: Path to ``candidates.parquet``. Required for
+        candidates_path: Deprecated – candidates are now embedded in events parquet.
                          ``candidate_mode="top_k"``.
         reward_mode:    "worker" | "requester".
         candidate_mode: "event_group" | "top_k".
@@ -156,8 +156,6 @@ class CrowdRecEnv:
             raise ValueError(f"candidate_mode must be 'event_group' or 'top_k', got {cfg.candidate_mode!r}")
         if cfg.reward_mode not in ("worker", "requester"):
             raise ValueError(f"reward_mode must be 'worker' or 'requester', got {cfg.reward_mode!r}")
-        if cfg.candidate_mode == "top_k" and not cfg.candidates_path:
-            raise ValueError("candidate_mode='top_k' requires candidates_path")
 
         # --- Load data ---
         self.events_df: pd.DataFrame = self._load_parquet(cfg.events_path)
@@ -185,8 +183,9 @@ class CrowdRecEnv:
         self._project_idx = self.project_features.set_index("project_id")
 
         if cfg.candidate_mode == "top_k":
-            self.candidates_df: pd.DataFrame = self._load_parquet(cfg.candidates_path)
-            self._cand_lookup = self.candidates_df.set_index("event_id")["candidate_projects"].to_dict()
+            # candidates are embedded in events_df as candidate_projects column
+            pos = self.events_df[self.events_df["label"] == 1]
+            self._cand_lookup = dict(zip(pos["event_id"], pos["candidate_projects"]))
         else:
             self.candidates_df = pd.DataFrame()
             self._cand_lookup = {}
@@ -538,7 +537,6 @@ def make_env(split: str = "train",
         events_path=os.path.join(processed_dir, f"{split}_events.parquet"),
         worker_features_path=os.path.join(processed_dir, "worker_features.parquet"),
         project_features_path=os.path.join(processed_dir, "project_features.parquet"),
-        candidates_path=os.path.join(processed_dir, "candidates.parquet"),
         reward_mode=reward_mode,
         candidate_mode=candidate_mode,
         max_candidates=max_candidates,
