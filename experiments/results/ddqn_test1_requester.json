@@ -1,0 +1,25 @@
+[
+  {
+    "method_name": "Double-DQN",
+    "split": "test",
+    "reward_mode": "requester",
+    "results": {
+      "total_reward": 13420.69506406784,
+      "avg_reward": 0.20837000161575955,
+      "hit_rate": 0.11535834057881009,
+      "std_reward": 0.0,
+      "min_reward": 13420.69506406784,
+      "max_reward": 13420.69506406784,
+      "total_steps": 64408,
+      "n_episodes": 1,
+      "hit_rate_1": 0.11535834057881009,
+      "hit_rate_5": 0.11535834057881009,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.11535834057881009,
+      "total_samples": 64408
+    },
+    "evaluation_time_seconds": 285.211991,
+    "timestamp": "2026-05-30T22:23:36.076706"
+  }
+]

@@ -38,5 +38,6 @@ figures/
 # MyPy
 .mypy_cache/
 
-# dataset2
+# dataset1&2
+processed_1to10/
 processed_1to20/

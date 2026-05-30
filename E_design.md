@@ -6,7 +6,7 @@
 > - `baselines/greedy_worker.py` — Greedy-Worker 策略（LR 学权重，worker reward 优化）
 > - `baselines/greedy_requester.py` — Greedy-Requester 策略（LR 学权重，requester reward 优化）
 > - `baselines/random_baseline.py` — Random 策略（均匀随机）
-> - `baselines/dqn_policy.py` — DQN 策略封装（接入 C 角色模型）
+> - `baselines/dqn_policy.py` — DQN / Double-DQN 策略封装（接入 C/D 角色模型）
 > - `baselines/find_weights_max_reward.py` — LR 权重学习脚本
 > - `evaluation/evaluate.py` — 统一评估框架
 > - `evaluation/metrics.py` — 评价指标计算
@@ -19,7 +19,7 @@
 
 E 角色负责 **Baseline 实现、统一评估、实验分析与展示**。核心职责：
 
-1. 实现 Random / Greedy / DQN 三类方法的评估接口
+1. 实现 Random / Greedy / DQN / Double-DQN 四类方法的评估接口
 2. 建立统一的评估框架，保证所有方法在相同条件下公平对比
 3. 收集实验结果，生成可视化图表，撰写分析报告
 
@@ -104,11 +104,11 @@ score(s, a) = w^T · φ(s, a) = Σ w_i × feature_i
 | Greedy-Worker    | worker_reward    | 最大化 worker 利益    |
 | Greedy-Requester | requester_reward | 最大化 requester 利益 |
 
-### 2.3 DQN 策略封装
+### 2.3 DQN / Double-DQN 策略封装
 
 **文件**：`baselines/dqn_policy.py`
 
-将 C 角色训练好的 DQN 模型封装为标准策略接口，接入评估框架。
+将 C 角色的 DQN 和 D 角色的 Double-DQN 模型封装为标准策略接口，接入评估框架。
 
 ```python
 class DQNPolicy:
@@ -118,6 +118,7 @@ class DQNPolicy:
 ```
 
 **关键设计**：
+- `agent_type="dqn"` 加载 C 的模型，`agent_type="double-dqn"` 加载 D 的模型
 - 根据 `reward_mode` 自动加载对应的模型文件（worker / requester）
 - `eval_mode=True`：关闭 epsilon-greedy 探索，纯贪心决策
 - 支持 GPU 加速（`device="auto"` 自动检测）
@@ -188,6 +189,8 @@ python -m evaluation.evaluate \
 | B    | `info["ground_truth_index"]`             | 真实选择索引，用于指标计算 |
 | C    | `c_basic_dqn/agent_dqn.py` 的 `DQNAgent` | 加载训练好的 DQN 模型      |
 | C    | `c_basic_dqn/basic_dqn_best_*.pth`       | 模型权重文件               |
+| D    | `d_double_dqn/agent_ddqn.py`             | 加载训练好的 Double-DQN 模型 |
+| D    | `d_double_dqn/double_dqn_best_*.pth`     | Double-DQN 模型权重文件    |
 
 ### 接口规范
 
@@ -222,14 +225,22 @@ CrowdRec-RL/
 │   └── plotting.py              # 可视化工具
 ├── experiments/
 │   └── results/                 # 实验结果 JSON
-│       ├── random_greedy_test_worker.json
+│       ├── random_greedy_test_worker.json       # Random + Greedy (1:2)
 │       ├── random_greedy_test_requester.json
-│       ├── dqn_test_worker.json
-│       ├── dqn_test_requester.json
-│       ├── random_greedy_test2_worker.json
+│       ├── random_greedy_test2_worker.json      # Random + Greedy (1:19)
 │       ├── random_greedy_test2_requester.json
-│       ├── dqn_test2_worker.json
-│       └── dqn_test2_requester.json
+│       ├── dqn_test_worker.json                 # DQN (1:2)
+│       ├── dqn_test_requester.json
+│       ├── dqn_test1_worker.json                # DQN (1:9)
+│       ├── dqn_test1_requester.json
+│       ├── dqn_test2_worker.json                # DQN (1:19)
+│       ├── dqn_test2_requester.json
+│       ├── ddqn_test_worker.json                # Double-DQN (1:2)
+│       ├── ddqn_test_requester.json
+│       ├── ddqn_test1_worker.json               # Double-DQN (1:9)
+│       ├── ddqn_test1_requester.json
+│       ├── ddqn_test2_worker.json               # Double-DQN (1:19)
+│       └── ddqn_test2_requester.json
 └── E_design.md                  # 本文档
 ```
 
@@ -237,22 +248,34 @@ CrowdRec-RL/
 
 ## 6. 实验结果摘要
 
-### Test Set（1:2，3 候选）
+### Test Set（1:2，3 候选，68,512 步）
 
 | 方法             | Worker Avg Reward | Worker Hit@1 | Requester Avg Reward | Requester Hit@1 |
 | ---------------- | ----------------- | ------------ | -------------------- | --------------- |
-| Random           | 0.498             | 33.2%        | 0.605                | 33.2%           |
-| Greedy-Worker    | 0.837             | 56.2%        | 1.018                | 56.2%           |
-| Greedy-Requester | 0.830             | 55.8%        | 1.011                | 55.8%           |
-| **DQN**          | **1.486**         | **99.997%**  | **1.800**            | **99.76%**      |
+| Random           | 0.498             | 33.2%        | 0.604                | 33.2%           |
+| Greedy-Worker    | 0.835             | 56.1%        | 1.015                | 56.1%           |
+| Greedy-Requester | 0.829             | 55.7%        | 1.009                | 55.7%           |
+| **DQN**          | **0.958**         | **64.6%**    | **1.170**            | **64.8%**       |
+| Double-DQN       | 0.874             | 59.0%        | 1.129                | 62.7%           |
 
-### Test2 Set（1:19，~20 候选）
+### Test1 Set（1:9，~10 候选，64,408 步）
+
+| 方法         | Worker Avg Reward | Worker Hit@1 | Requester Avg Reward | Requester Hit@1 |
+| ------------ | ----------------- | ------------ | -------------------- | --------------- |
+| DQN          | 0.268             | 18.1%        | 0.334                | 18.5%           |
+| Double-DQN   | 0.183             | 12.3%        | 0.208                | 11.5%           |
+
+### Test2 Set（1:19，~20 候选，62,781 步）
 
 | 方法             | Worker Avg Reward | Worker Hit@1 | Requester Avg Reward | Requester Hit@1 |
 | ---------------- | ----------------- | ------------ | -------------------- | --------------- |
-| Random           | 0.078             | 5.2%         | 0.095                | 5.2%            |
-| Greedy-Worker    | 0.283             | 18.9%        | 0.345                | 18.9%           |
-| Greedy-Requester | 0.269             | 18.0%        | 0.329                | 18.0%           |
-| **DQN**          | **1.475**         | **99.1%**    | **1.509**            | **83.0%**       |
+| Random           | 0.079             | 5.3%         | 0.095                | 5.3%            |
+| Greedy-Worker    | 0.274             | 18.6%        | 0.334                | 18.6%           |
+| Greedy-Requester | 0.264             | 17.8%        | 0.322                | 17.8%           |
+| DQN              | 0.134             | 9.0%         | 0.168                | 9.3%            |
+| Double-DQN       | 0.091             | 6.1%         | 0.106                | 5.9%            |
+
+> 注：Test1 集无 baseline 结果；DQN/DDQN 在 1:2 数据集上训练，测试泛化到 1:9 和 1:19。
+> DQN/DDQN 在 test2 上表现低于 Greedy，说明 RL 模型在训练分布外泛化能力有限。
 
 详细分析见 `E_res.md`。

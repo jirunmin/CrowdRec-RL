@@ -1,0 +1,25 @@
+[
+  {
+    "method_name": "DQN",
+    "split": "test",
+    "reward_mode": "worker",
+    "results": {
+      "total_reward": 17289.353451013565,
+      "avg_reward": 0.26843487534178306,
+      "hit_rate": 0.1813905104955906,
+      "std_reward": 0.0,
+      "min_reward": 17289.353451013565,
+      "max_reward": 17289.353451013565,
+      "total_steps": 64408,
+      "n_episodes": 1,
+      "hit_rate_1": 0.1813905104955906,
+      "hit_rate_5": 0.1813905104955906,
+      "ndcg_1": 1.0,
+      "ndcg_5": 1.0,
+      "mrr": 0.1813905104955906,
+      "total_samples": 64408
+    },
+    "evaluation_time_seconds": 200.33257,
+    "timestamp": "2026-05-30T22:17:00.545147"
+  }
+]

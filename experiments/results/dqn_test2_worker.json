@@ -4,22 +4,22 @@
     "split": "test",
     "reward_mode": "worker",
     "results": {
-      "total_reward": 92573.67357754707,
-      "avg_reward": 1.4745492040194816,
-      "hit_rate": 0.9914783135024928,
+      "total_reward": 8415.801908135414,
+      "avg_reward": 0.1340501410957999,
+      "hit_rate": 0.09047323234736625,
       "std_reward": 0.0,
-      "min_reward": 92573.67357754707,
-      "max_reward": 92573.67357754707,
+      "min_reward": 8415.801908135414,
+      "max_reward": 8415.801908135414,
       "total_steps": 62781,
       "n_episodes": 1,
-      "hit_rate_1": 0.9914941064033131,
-      "hit_rate_5": 0.9914941064033131,
+      "hit_rate_1": 0.09047467346288628,
+      "hit_rate_5": 0.09047467346288628,
       "ndcg_1": 0.0,
-      "ndcg_5": 1.0,
-      "mrr": 0.9914783135024928,
+      "ndcg_5": 0.0,
+      "mrr": 0.09047323234736625,
       "total_samples": 62781
     },
-    "evaluation_time_seconds": 239.280781,
-    "timestamp": "2026-05-29T17:45:47.441729"
+    "evaluation_time_seconds": 219.229013,
+    "timestamp": "2026-05-30T22:04:45.502509"
   }
 ]

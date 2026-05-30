@@ -264,6 +264,7 @@ def run_full_evaluation(
 
     try:
         from src.env import make_env
+        # from src.fastenv import make_fast_env
     except ImportError:
         print("❌ Cannot import make_env from src.env. Make sure you're running from project root.")
         return []
@@ -275,15 +276,18 @@ def run_full_evaluation(
         print(f"{'#'*70}\n")
 
     env_factory = lambda: make_env(split=split, reward_mode=reward_mode, candidate_mode=candidate_mode, processed_dir=processed_dir)
-
+    # env_factory = lambda: make_fast_env(split=split, reward_mode=reward_mode, candidate_mode=candidate_mode, processed_dir=processed_dir)
+    
     all_policies = [
         ("Random", RandomPolicy(seed=42)),
         ("Greedy-Worker", GreedyWorkerPolicy(seed=42)),
         ("Greedy-Requester", GreedyRequesterPolicy(seed=42)),
     ]
 
-    # 判断是否需要加载 DQN
-    need_dqn = methods is None or "dqn" in [m.lower() for m in methods]
+    # 判断需要加载哪些 RL 模型
+    methods_lower = [m.lower() for m in methods] if methods else []
+    need_dqn = methods is None or "dqn" in methods_lower
+    need_double_dqn = methods is None or "double-dqn" in methods_lower
 
     # 根据 reward_mode 添加对应的 DQN 模型
     if has_dqn and need_dqn:
@@ -299,6 +303,21 @@ def run_full_evaluation(
                 all_policies.append(("DQN", dqn))
             except Exception as e:
                 print(f"⚠️ 无法加载 DQN requester 模型: {e}")
+
+    # 根据 reward_mode 添加对应的 Double DQN 模型
+    if has_dqn and need_double_dqn:
+        if reward_mode == "worker":
+            try:
+                ddqn = DQNPolicy(model_path="d_double_dqn/double_dqn_best_worker_model.pth", device="auto", agent_type="double-dqn")
+                all_policies.append(("Double-DQN", ddqn))
+            except Exception as e:
+                print(f"⚠️ 无法加载 Double-DQN worker 模型: {e}")
+        elif reward_mode == "requester":
+            try:
+                ddqn = DQNPolicy(model_path="d_double_dqn/double_dqn_best_requester_model.pth", device="auto", agent_type="double-dqn")
+                all_policies.append(("Double-DQN", ddqn))
+            except Exception as e:
+                print(f"⚠️ 无法加载 Double-DQN requester 模型: {e}")
 
     if methods is not None:
         methods_lower = [m.lower() for m in methods]
