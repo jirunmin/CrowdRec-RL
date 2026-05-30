@@ -167,12 +167,77 @@ def test_make_env_val_small() -> None:
     print(f"   first 500 steps: total_reward={total:.2f}, hits={n_hits}")
 
 
+def test_no_gt_index_leak() -> None:
+    """Regression: gt_index must not be biased toward 0.
+
+    If candidates are sorted by `label` descending (an earlier bug), the
+    positive sample sits at index 0 in nearly every group and a trivial
+    'always pick action 0' policy reaches 100% hit rate.
+    """
+    print("[6] gt_index distribution is unbiased + always-0 baseline ≈ 1/3")
+    env = make_env("val", processed_dir=str(PROCESSED), reward_mode="worker")
+    from collections import Counter
+    dist = Counter()
+    for s in env._steps:
+        if s["gt_index"] >= 0:
+            dist[s["gt_index"]] += 1
+    total = sum(dist.values())
+    pct0 = dist[0] / total
+    print(f"   gt_index=0 share: {pct0:.3f} (expect ≈ 1/3)")
+    assert 0.25 < pct0 < 0.45, f"gt_index leak detected: {pct0:.3f}"
+
+    # Always-0 baseline check.
+    obs = env.reset()
+    hits, resolvable = 0, 0
+    for _ in range(min(2000, len(env))):
+        obs, _, done, info = env.step(0)
+        if info["ground_truth_index"] >= 0:
+            resolvable += 1
+            if info["hit"]:
+                hits += 1
+        if done:
+            break
+    rate = hits / max(resolvable, 1)
+    print(f"   always-0 hit rate: {rate:.3f} (must NOT be ≈1.0)")
+    assert rate < 0.45, f"label leak: always-0 policy gets {rate:.3f}"
+
+
+def test_match_features_match_parquet() -> None:
+    """Regression: env._match_block must reproduce parquet match_* columns.
+
+    Two earlier bugs:
+        - falsy-0 in `pref_industry`: ``0.0 or -1`` → -1 wrongly nukes match_industry
+        - worker_quality not falling back to worker_quality_pred for unlabeled
+          workers, breaking match_quality_gap
+    """
+    print("[7] env._match_block consistent with parquet match_* columns")
+    env = make_env("train", processed_dir=str(PROCESSED), reward_mode="worker")
+    sample = env.events_df.head(5_000)
+    mismatches = {"cat": 0, "sub": 0, "ind": 0, "gap": 0}
+    for _, ev in sample.iterrows():
+        m = env._match_block(int(ev["worker"]),
+                              np.array([int(ev["project_id"])], dtype=np.int64))
+        if abs(m[0, 0] - ev["match_category"]) > 1e-5:
+            mismatches["cat"] += 1
+        if abs(m[0, 1] - ev["match_sub_category"]) > 1e-5:
+            mismatches["sub"] += 1
+        if abs(m[0, 2] - ev["match_industry"]) > 1e-5:
+            mismatches["ind"] += 1
+        if abs(m[0, 3] - ev["match_quality_gap"]) > 1e-5:
+            mismatches["gap"] += 1
+    print(f"   mismatches over 5000 events: {mismatches}")
+    for k, v in mismatches.items():
+        assert v == 0, f"match_{k} drift: {v} mismatches"
+
+
 def main() -> None:
     test_reward_consistency_with_event_group()
     test_mini_event_group()
     test_mini_requester_reward()
     test_mini_top_k()
     test_make_env_val_small()
+    test_no_gt_index_leak()
+    test_match_features_match_parquet()
     print("\nAll env smoke tests passed.")
 
 
