@@ -8,7 +8,7 @@ conda create -n crowdrec python=3.10 -y
 conda activate crowdrec
 pip install -r requirements.txt
 
-# 重跑数据预处理（如需，约 2 分钟）
+# 重跑数据预处理（默认已有，如需重跑，约 2 分钟）
 python main_preprocess.py --output_dir processed --neg_ratio 2.0 --top_k 20
 
 # 查看数据统计
@@ -111,7 +111,7 @@ reward_requester = 2.0×quality + 1.0×winner
 | Val | 208,971 (15%) | 2018-03 ~ 2018-09 |
 | Test | 208,971 (15%) | 2018-09 ~ 2019-03 |
 
-**候选集生成**：为每个正样本事件计算当时活跃的 Top-20 候选项目，按 `urgency + featured_bonus + award_score` 排序。保存在 `candidates.parquet` 中。
+**候选集生成**：为每个正样本事件计算当时活跃的 Top-20 候选项目，按 `urgency + featured_bonus + award_score` 排序。结果直接存为事件表的 `candidate_projects` 列，每个数据集文件均有。
 
 ---
 
@@ -232,11 +232,12 @@ print(train.head(1))  # 查看第一行
 
 Worker/Project 的**静态特征查找表**，用于环境中构造 state。
 
-### 4.3 `candidates.parquet`
+### 4.3 `candidate_projects` 列
 
-仅包含正样本事件，多了 `candidate_projects` 列：
+仅正样本 (label=1) 有值：
 - 类型：`list[int]`，长度 0~20
-- 含义：该事件时刻，当时活跃的 Top-20 候选项目 ID 列表
+- 含义：该事件时刻当时活跃的 Top-20 候选项目 ID 列表
+- train/val/test 三个文件均包含此列，且 `worker_done` 跨 split 累积（val 的候选排除了 worker 在 train 中已参与的项目）
 
 ### 4.4 `stats.json`
 
@@ -251,12 +252,11 @@ Worker/Project 的**静态特征查找表**，用于环境中构造 state。
 ```
 CrowdRec-RL/
 ├── processed/                 # ← DQN输入数据（已生成）
-│   ├── train_events.parquet   # 训练集（975k 条）
-│   ├── val_events.parquet     # 验证集（209k 条）
-│   ├── test_events.parquet    # 测试集（209k 条）
+│   ├── train_events.parquet   # 训练集 975k 条（含 candidate_projects 列）
+│   ├── val_events.parquet     # 验证集 209k 条（含 candidate_projects 列）
+│   ├── test_events.parquet    # 测试集 209k 条（含 candidate_projects 列）
 │   ├── worker_features.parquet
 │   ├── project_features.parquet
-│   ├── candidates.parquet     # Top-20 候选
 │   └── stats.json
 ├── figures/                   # 数据统计图表（8 张）
 ├── src/                       # 预处理代码

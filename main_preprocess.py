@@ -18,6 +18,7 @@ import os
 import sys
 
 import pandas as pd
+from tqdm import tqdm
 
 # 将项目根目录加入 path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +31,7 @@ from src.quality_predictor import (train_quality_predictor,
                                     predict_quality)
 from src.event_stream import build_event_stream, build_training_samples
 from src.dataset import (generate_candidates_batch,
+                          generate_candidates_fast,
                           save_processed_data,
                           split_by_time)
 
@@ -142,12 +144,58 @@ def main():
     )
 
     # ============================================================
-    # Step 6: 生成候选集（高速 numpy 版）& 保存
+    # Step 6: 生成候选集 & 保存
     # ============================================================
     if not args.skip_candidates:
-        pos_events_with_candidates = generate_candidates_batch(
-            train_df, projects_dict, top_k=args.top_k
-        )
+        # 按时序生成候选：train → val → test，worker_done 跨 split 累积
+        print(f"\n[5.2] 生成 Top-{args.top_k} 候选项目集合（跨 train/val/test）...")
+        all_pos = training_samples_df[training_samples_df["label"] == 1].sort_values("timestamp")
+        
+        # 为每个 split 的 worker 预初始化 done 集
+        worker_done = {}
+        candidate_map = {}  # event_id → list of project_ids
+        
+        for split_name, split_df in [("train", train_df[train_df["label"]==1]),
+                                       ("val",   val_df[val_df["label"]==1]),
+                                       ("test",  test_df[test_df["label"]==1])]:
+            split_sorted = split_df.sort_values("timestamp")
+            cand_lists = []
+            for _, row in tqdm(split_sorted.iterrows(), total=len(split_sorted),
+                                desc=f"  {split_name} candidates"):
+                w = row["worker"]
+                t = row["timestamp"]
+                pid = row["project_id"]
+                done_set = worker_done.get(w, set())
+                cands = generate_candidates_fast(projects_dict, w, t, done_set, top_k=args.top_k)
+                cand_lists.append(cands)
+                candidate_map[row["event_id"]] = cands
+                if w not in worker_done:
+                    worker_done[w] = set()
+                worker_done[w].add(pid)
+            
+            # 将候选集写入对应 split 的 events
+            eids = split_sorted["event_id"].values
+            for eid, clist in zip(eids, cand_lists):
+                candidate_map[eid] = clist
+
+        # 将候选集关联到 train/val/test
+        def attach_candidates(events_df, cand_map):
+            events_df = events_df.copy()
+            events_df["candidate_projects"] = events_df["event_id"].map(
+                lambda eid: cand_map.get(eid, [])
+            )
+            return events_df
+
+        train_df = attach_candidates(train_df, candidate_map)
+        val_df   = attach_candidates(val_df, candidate_map)
+        test_df  = attach_candidates(test_df, candidate_map)
+
+        # 统计
+        for name, df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+            pos = df[df["label"] == 1]
+            cnt = pos["candidate_projects"].apply(len)
+            print(f"  {name} 候选数: mean={cnt.mean():.1f}, median={cnt.median():.0f}, "
+                  f"min={cnt.min()}, max={cnt.max()}")
 
     save_processed_data(
         train_df, val_df, test_df,
@@ -155,19 +203,13 @@ def main():
         output_dir=args.output_dir
     )
 
-    if not args.skip_candidates:
-        cand_path = os.path.join(args.output_dir, "candidates.parquet")
-        pos_events_with_candidates.to_parquet(cand_path, index=False)
-
     print("\n" + "=" * 60)
     print("预处理完成！输出文件:")
-    print(f"  {args.output_dir}/train_events.parquet")
-    print(f"  {args.output_dir}/val_events.parquet")
-    print(f"  {args.output_dir}/test_events.parquet")
+    print(f"  {args.output_dir}/train_events.parquet  (含 candidate_projects 列)")
+    print(f"  {args.output_dir}/val_events.parquet    (含 candidate_projects 列)")
+    print(f"  {args.output_dir}/test_events.parquet   (含 candidate_projects 列)")
     print(f"  {args.output_dir}/worker_features.parquet")
     print(f"  {args.output_dir}/project_features.parquet")
-    if not args.skip_candidates:
-        print(f"  {args.output_dir}/candidates.parquet")
     print(f"  {args.output_dir}/stats.json")
     print("=" * 60)
 
