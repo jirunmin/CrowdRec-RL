@@ -22,8 +22,11 @@ STEP_LOG_INTERVAL = 5_000
 REWARD_SCALE = 20.0
 EPSILON_DECAY_STEPS = 1_675_000
 TARGET_UPDATE_FREQ = 2_000
-EVAL_EPISODES = 1
+EVAL_EPISODES = 3
 SEED = 42
+EARLY_STOP_PATIENCE = 5
+VAL_METRIC_MIN_DELTA = 0.002
+EARLY_STOP_METRIC = "val_reward"
 DEFAULT_CANDIDATE_MODE = "event_group"
 DEFAULT_PROCESSED_DIR = ROOT / "processed"
 DEFAULT_OUT_DIR = Path(__file__).resolve().parent
@@ -60,6 +63,7 @@ def evaluate_model(
     eval_episodes=EVAL_EPISODES,
 ):
     episode_rewards = []
+    episode_success_rates = []
     for _ in range(eval_episodes):
         env = make_env(
             split=split,
@@ -67,20 +71,27 @@ def evaluate_model(
             reward_mode=reward_mode,
             candidate_mode=candidate_mode,
             seed=SEED,
+            normalize_features=True,
         )
         obs = env.reset()
         total_reward = 0.0
         done = False
+        hits = 0
+        valid_steps = 0
 
         while not done:
             state = obs_to_state(obs)
             action = agent.select_action(state, valid_mask=obs["valid_mask"], eval_mode=True)
-            obs, reward, done, _ = env.step(action)
+            obs, reward, done, info = env.step(action)
             total_reward += reward
+            if info.get("ground_truth_index", -1) >= 0:
+                valid_steps += 1
+                hits += int(info.get("hit", 0))
 
         episode_rewards.append(float(total_reward))
+        episode_success_rates.append(float(hits / valid_steps) if valid_steps > 0 else 0.0)
 
-    return float(np.mean(episode_rewards))
+    return float(np.mean(episode_rewards)), float(np.mean(episode_success_rates))
 
 
 def resolve_batch_size(device: str, base_batch_size: int = 64) -> int:
@@ -122,6 +133,7 @@ def run_training_pipeline(
         reward_mode=reward_mode,
         candidate_mode=candidate_mode,
         seed=SEED,
+        normalize_features=True,
     )
 
     batch_size = resolve_batch_size(resolved_device)
@@ -141,6 +153,8 @@ def run_training_pipeline(
     print(f"[Info] device={agent.device}, batch_size={agent.batch_size}")
 
     best_val_reward = -float("inf")
+    best_val_success_rate = -float("inf")
+    no_improve_count = 0
     train_rewards, losses, eps_history = [], [], []
     step_logs = []
 
@@ -218,7 +232,7 @@ def run_training_pipeline(
         losses.append(ep_loss / steps if steps > 0 else 0.0)
         eps_history.append(agent.epsilon)
 
-        val_reward = evaluate_model(
+        val_reward, val_success_rate = evaluate_model(
             agent,
             split="val",
             reward_mode=reward_mode,
@@ -226,6 +240,11 @@ def run_training_pipeline(
             candidate_mode=candidate_mode,
             eval_episodes=EVAL_EPISODES,
         )
+
+        # Early stopping (match C baseline)
+        monitored_metric = val_reward if EARLY_STOP_METRIC == "val_reward" else val_success_rate
+        best_monitored = best_val_reward if EARLY_STOP_METRIC == "val_reward" else best_val_success_rate
+
         if val_reward > best_val_reward:
             best_val_reward = val_reward
             model_path = out_dir / f"double_dqn_best_{reward_mode}_model.pth"
@@ -235,10 +254,23 @@ def run_training_pipeline(
                 f"(ep={ep + 1}, val_reward={val_reward:.2f})"
             )
 
+        if val_success_rate > best_val_success_rate:
+            best_val_success_rate = val_success_rate
+
+        if monitored_metric - best_monitored > VAL_METRIC_MIN_DELTA:
+            best_monitored = monitored_metric
+            no_improve_count = 0
+        else:
+            no_improve_count += 1
+
+        if no_improve_count >= EARLY_STOP_PATIENCE:
+            tqdm.write(f"[EarlyStop] no improvement for {EARLY_STOP_PATIENCE} episodes, stopping")
+            break
+
         tqdm.write(
             f"Ep {ep + 1:03d} | Buffer: {len(agent.replay_buffer)} | "
             f"Train Reward: {ep_reward:.2f} | Val Reward: {val_reward:.2f} | "
-            f"Loss: {losses[-1]:.6f} | Eps: {agent.epsilon:.4f}"
+            f"Val Succ: {val_success_rate:.4f} | Loss: {losses[-1]:.6f} | Eps: {agent.epsilon:.4f}"
         )
 
         episode_pbar.set_postfix(
@@ -248,6 +280,7 @@ def run_training_pipeline(
                 "eps": f"{agent.epsilon:.4f}",
                 "buf": len(agent.replay_buffer),
                 "val": f"{val_reward:.2f}",
+                "succ": f"{val_success_rate:.3f}",
             }
         )
 
